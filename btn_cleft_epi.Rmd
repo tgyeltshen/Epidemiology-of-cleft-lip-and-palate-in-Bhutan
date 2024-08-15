@@ -1,0 +1,296 @@
+---
+title: Epidemiological Trends and Prevalence of Cleft Lip and Palate in Bhutan
+author: "Tshewang Gyeltshen, Karma Tobgay"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: yes
+      smooth_scroll: no
+    number_sections: no
+    toc_depth: 3
+    df_print: paged
+    code_folding: hide
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+editor_options:
+  chunk_output_type: console
+  theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, results="asis",warning = FALSE, message = FALSE)
+rm(list = ls())
+setwd("D:/Research/Bhutan_cleft_epi/")
+```
+
+#Loading the required library packages
+
+```{r Loading library, echo=FALSE}
+library(dplyr)
+library(ggplot2)
+library(arsenal)
+library(knitr)
+library(gtsummary)
+library(ggplot2)
+library(Hmisc)
+
+```
+
+#Load and Prepare Data
+```{r Loading and data preparation}
+#Loading the dataset
+cleft <- readxl::read_xlsx("D:/Research/Bhutan_cleft_epi/NBD_data2015_20222.xlsx")
+
+#Selecting the required variables for the study 
+cleft001 <- cleft %>%
+  select(
+    hosp_name = `Hospital Name`,
+    birthdate = `Baby Birth Date`,
+    m_age_cat = `Mom's Age`,
+    m_age = `Mother Age`,
+    f_age_cat = `Dad's Age`,
+    f_age = `Father Age`,
+    sex = `Baby Gender`,
+    birthwgt_cat = `Birth-Weight`,
+    birthwgt = `Baby Birth Weight`,
+    hd_crcmfrnce = `Head Circumference`,
+    gestage = `Gestational-Age`,
+    gestwk = `Gestation Week`,
+    #icd = `ICD Code`,
+    bd_cat_main = `Main BD Category`,
+    bd_cat_sub = `Sub BD Category`
+  ) %>%
+  filter(bd_cat_main == "Q35-Q37 Cleft lip and palate") %>% 
+  mutate(
+    year = as.numeric(format(birthdate, '%Y')),  # extracting year from the baby birth-date
+    hosp_name = case_when(
+        hosp_name == "ERRH: Eastern Regional Referral Hospital, Mongar" ~ "ERRH",
+        hosp_name == "JDWNR: Jigme Dorji Wangchuck National Referral Hospital" ~ "JDWNRH",
+        TRUE ~ hosp_name ),
+    hd_crcmfrnce = ifelse(hd_crcmfrnce == -1, NA, hd_crcmfrnce), 
+         f_age = if_else(f_age == -1, NA, f_age)
+    )
+
+pop_btn <- data.frame(year = c(2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022), 
+                      male_pop = c(393324, 398948, 380453, 383909, 387402, 390877, 394323, 397731), 
+                      female_pop = c(363718, 369629, 346692, 350465, 354270, 358054, 361806, 365518), 
+                      lb_male = c(NA, 5400, 5423, 5753, 5191, 5266, 5452, NA), 
+                      lb_female = c(NA, 5057, 5189, 5615, 4995, 4974, 5303, NA), 
+                      cbr = c(17.5, 14.4, 15.5, 15.5, 13.7, 13.7, 14.2, 16.00 )) #2017&2022-Bhu_Pop_Proj.pdf
+#vital statistics 2021 & 2022 NSB
+pop_btn$total <- pop_btn$male + pop_btn$female
+# Srce: Population Projections of Bhutan, 2005-2030, and 2017-2047; NSB
+
+pop_btn <- pop_btn %>% 
+  mutate(cbr_n = ((lb_male+lb_female)/total)*1000,
+         cbr_n = if_else(is.na(cbr_n), cbr, cbr_n))
+
+tot_defect <- cleft %>%
+   mutate(
+    year = as.numeric(format(`Baby Birth Date`, '%Y'))) %>% 
+  group_by(year) %>%
+  summarise(
+    total_defect = n())
+
+cleft002 <- cleft001 %>%
+  mutate(f_age = if_else(f_age == -1, NA_real_, f_age), 
+         hd_crcmfrnce = if_else(hd_crcmfrnce == -1, NA_real_, hd_crcmfrnce)) %>% 
+  group_by(year) %>%
+  summarise(
+    obs = n(),
+    m_age = mean(m_age),
+    #f_age = mean(f_age, na.rm = T),
+    hd_crcmfrnce = mean(hd_crcmfrnce, na.rm = T),
+    sexm = sum(sex =="Male"),
+    sexf = sum(sex == "Female"),
+    birthwgt = mean(birthwgt),
+    gestwk = mean(gestwk)
+  )
+
+cleft002 <- within(cleft002, {
+  femalepop <- pop_btn$female
+  malepop <- pop_btn$male
+  totalpop <- femalepop + malepop
+  lb_male <- pop_btn$lb_male
+  lb_female <- pop_btn$lb_female
+  cbr <- round(pop_btn$cbr_n, digits = 2)
+  total_birth <- pop_btn$lb_male + pop_btn$lb_female
+  total_birth <- if_else(is.na(total_birth), 
+                         round(cbr*totalpop/1000, digits = 0), 
+                         total_birth)
+  total_defect <- tot_defect$total_defect
+  #year <- factor(year)
+})
+
+cleft002 <- cleft002 %>% 
+  select(year, obs, total_defect, lb_female, lb_male, total_birth, cbr, femalepop, malepop, totalpop, sexm, sexf, m_age, hd_crcmfrnce, birthwgt, gestwk )
+
+cleft002$clp_pertge <- round(cleft002$obs/cleft002$total_birth*1000, digits = 2)
+
+cleft002$dft_pertge <- round(cleft002$total_defect/cleft002$total_birth*1000, digits = 2)
+
+#save(cleft002, file ="cleft002.rda")
+
+```
+
+# Descriptive Statistics
+Running Descriptive Statistics and exploring dataset
+```{r Descriptive Statistics}
+# summarizing by specific defects
+summary(freqlist(~bd_cat_sub, labelTranslations = 
+                   c(bd_cat_sub = "Specific Birth Defect Category"),cleft001, na.options = "remove")
+        )
+```
+
+## Table 1. Characterstics of the Babies
+
+    -   Year
+    -   Sex of the Babies (sex)
+    -   Age of the mother (m_age_cat)
+    -   Age of the father (f_age_cat)
+    -   Birth Weight Category (birthwgt_cat)
+    -   Head Circumference
+    -   Gestational Age Category (gestage)
+    
+```{r tab1_Demographic_characterstics}
+tab1 <- tableby( ~  factor(year) + sex + m_age_cat + f_age_cat + birthwgt_cat + hd_crcmfrnce + gestage, data= cleft001, test=F)
+labels(tab1)  <- c(`factor(year)` = "Year", 
+                   sex = "Sex of the Babies", 
+                   m_age_cat= "Age Category of the Mother", 
+                   f_age_cat= "Age Category of the Father", 
+                   birthwgt_cat = "Birth Weight Category", 
+                   gestage = "Gestational Age Category", 
+                   hd_crcmfrnce = "Head Circumference"
+                   )
+summary(tab1, title='**Table 1: Characterstics of the cleft lip and palate babies**', pfootnote = TRUE)
+
+#write2word(tab1, "Characterstics.doc", title = "Table 1.Characteristics of the survey participants")
+
+```
+
+# Trends and Visualization
+```{r trend_graph}
+#Trend over the years 
+fig1<- cleft001 %>%
+  group_by(year) %>%
+  summarise(obs = n()) %>%
+  ggplot(aes(year, obs)) + 
+  geom_point(shape = 20, colour = "blue", size = 5) + 
+  geom_text(aes(label = obs), vjust = -0.5) +  # Label the count points
+  labs(title = "Prevalence", 
+       x = "Years", 
+       y = "Number of Cleft Babies born") +
+  geom_smooth(method = NULL, aes(color = "red"), se = F) + 
+  scale_x_continuous(breaks = unique(cleft001$year)) +  # Ensure all years are displayed
+  theme_classic() +
+   theme(plot.title = element_text(hjust = 0.5))
+
+#Oro-facial Anomalies over the years 
+count <- cleft001 %>% 
+  filter(!is.na(bd_cat_sub)) %>%
+  group_by(year) %>%
+  count(bd_cat_sub)
+
+ggplot(count, aes(x = year, y = n, fill = bd_cat_sub, colour = bd_cat_sub)) + 
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.5) + 
+  geom_text(aes(label = n), 
+            position = position_dodge(width = 0.9),
+            vjust = -0.5, 
+            size = 3, 
+            show.legend = FALSE)+
+  labs(title = "Total Cleft Babies by specific cleft type in Bhutan, 2015 - 2022", 
+       x = "Years", 
+       y = "Number of infants with cleft lip or palate", 
+       fill = "", 
+       color = "") + # removes the variable name from the legend
+  theme_classic() +
+  theme(legend.position = "bottom",  # Position legend at the bottom
+        legend.text = element_text(size = 9)) +  # Adjust legend text size
+  scale_x_continuous(breaks = unique(cleft001$year)) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(fill = NULL, colour = NULL, name = NULL)
+
+
+#Visualizing correlation between head circumference & Baby weight 
+cleft001 %>% 
+  ggplot(., 
+         aes(birthwgt, hd_crcmfrnce))+ 
+  geom_point(shape = 21, colour = "red", size = ) + 
+  labs(title = "Correlation between Baby Weight and Head Circumference", 
+       x = "Baby Weight in grams", 
+       y = "Head Circumference", 
+       caption = "Epidemiology of Cleft lip and Palate in Bhutan, 2015-2022")+
+  theme_classic() 
+
+#Visualizing correlation between Baby Weight and Gestational Age  
+cleft001 %>% 
+  ggplot(., 
+         aes(gestwk, birthwgt))+ 
+  geom_point(shape = 21, colour = "blue", size = 1.5) + 
+  labs(title = "Correlation between Gestational Week and Baby Weight", 
+       x = "Gestational Week in Weeks time", 
+       y = "Baby Weight in grams", 
+       caption = "Epidemiology of Cleft lip and Palate in Bhutan, 2015-2022")+
+  theme_classic()
+library(ggplot2)
+library(gridExtra)
+
+# Create a dataframe for IRR values and their 95% CIs
+irr_data <- data.frame(
+  IRR = c(1.20, 1.60, 1.70, 2.00, 1.60, 1.60, 1.50),
+  CI_lower = c(0.52, 0.74, 0.79, 0.96, 0.74, 0.74, 0.68),
+  CI_upper = c(2.84, 3.65, 3.85, 4.46, 3.65, 3.65, 3.45), 
+  year <- seq(2016, 2022)
+)
+
+# Plot the IRR values with error bars representing 95% CIs
+fig2 <- ggplot(irr_data, aes(x = factor(year), y = IRR)) +
+  geom_point(shape = 20, colour = "red", size = 5) +
+  geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper), width = 0.1) +
+  geom_text(aes(label = format(IRR, nsmall = 2)), vjust = 0, hjust = -0.2) + 
+  labs(title = "Incidence",
+       x = "Years",
+       y = "Incidence Rate Ratio (IRR)") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+grid.arrange(fig1, fig2, nrow = 1, top = "Prevalence and Incidence of Cleft Babies in Bhutan, 2015 - 2022")
+
+```
+
+# Correlates and Association
+## Table 2. Cross Tabulations by year 
+
+    -   Year
+    -   Sex of the Babies (sex)
+    -   Age of the mother (m_age_cat)
+    -   Age of the father (f_age_cat)
+    -   Birth Weight Category (birthwgt_cat)
+    -   Head Circumference
+    -   Gestational Age Category (gestage)
+    
+```{r tab2_cross_tabulations}
+tab2 <- tableby(year ~  gestage + sex + m_age_cat + f_age_cat + birthwgt_cat + hd_crcmfrnce, data= cleft001, test=T)
+labels(tab2)  <- c(gestage = "Gestational Age Category", 
+                   sex = "Sex of the Babies", 
+                   m_age_cat= "Mother's Age Category", 
+                   f_age_cat= "Father's Age Category", 
+                   birthwgt_cat = "Birthweight of the Babies", 
+                   hd_crcmfrnce = "Head Circumference at Birth"
+                   )
+summary(tab2, title='**Table 2: Maternal and Child Characteristics**', pfootnote = TRUE)
+
+#write2word(tab2, "M_Characteristics.doc", title = "Table 2.Maternal and Child Characteristics")
+
+```
+
+## Fitting Poisson
+```{r, GLM and Model Fitting}
+#poisson model to compute the incidence
+model <- glm(obs ~ factor(year), family = poisson, data = cleft002)
+tbl_regression(model, exponentiate = TRUE)
+
+```
